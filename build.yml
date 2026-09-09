@@ -1,0 +1,39 @@
+name: Build Dashboard Helper
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Create project
+        shell: pwsh
+        run: |
+          dotnet new console -n DashboardHelper -f net8.0
+          Copy-Item DashboardHelper.cs DashboardHelper/Program.cs -Force
+
+      - name: Publish EXE
+        run: |
+          dotnet publish DashboardHelper/DashboardHelper.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -o publish
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: DashboardHelper-Windows
+          path: publish/DashboardHelper.exe
