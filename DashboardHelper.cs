@@ -1,6 +1,6 @@
 using System;
 using System.Diagnostics;
-using System.Web;
+using System.IO;
 
 class DashboardHelper
 {
@@ -12,23 +12,50 @@ class DashboardHelper
 
         string uriText = args[0];
 
-        if (!uriText.StartsWith("dashboard://open", StringComparison.OrdinalIgnoreCase))
+        if (!uriText.StartsWith(
+            "dashboard://open",
+            StringComparison.OrdinalIgnoreCase))
+        {
             return 2;
+        }
 
-        if (!Uri.TryCreate(uriText, UriKind.Absolute, out Uri uri))
+        if (!Uri.TryCreate(
+            uriText,
+            UriKind.Absolute,
+            out Uri? uri))
+        {
             return 3;
+        }
 
-        string path = HttpUtility.ParseQueryString(uri.Query).Get("path");
+        string path = GetQueryParameter(uri, "path");
 
         if (string.IsNullOrWhiteSpace(path))
             return 4;
 
-        path = Uri.UnescapeDataString(path);
+        // Convert URL-style slashes to Windows slashes.
+        path = path.Replace('/', '\\');
 
-        // This helper only opens/selects a path in Explorer.
-        // It does not execute arbitrary commands.
-        if (path.Contains("\"") || path.Contains("\r") || path.Contains("\n"))
+        // Basic safety check.
+        if (path.Contains("\"") ||
+            path.Contains("\r") ||
+            path.Contains("\n"))
+        {
             return 5;
+        }
+
+        // Make sure the target actually exists.
+        if (!File.Exists(path) && !Directory.Exists(path))
+        {
+            MessageBox(
+                "Dashboard Helper\n\n" +
+                "The requested file could not be found:\n\n" +
+                path +
+                "\n\n" +
+                "Check the Recent Files Folder path in Dashboard Settings."
+            );
+
+            return 6;
+        }
 
         try
         {
@@ -41,9 +68,59 @@ class DashboardHelper
 
             return 0;
         }
-        catch
+        catch (Exception ex)
         {
-            return 6;
+            MessageBox(
+                "Dashboard Helper\n\n" +
+                "Could not open File Explorer.\n\n" +
+                ex.Message
+            );
+
+            return 7;
         }
+    }
+
+    static string GetQueryParameter(Uri uri, string key)
+    {
+        string query = uri.Query.TrimStart('?');
+
+        foreach (string part in query.Split(
+            '&',
+            StringSplitOptions.RemoveEmptyEntries))
+        {
+            string[] pieces = part.Split('=', 2);
+
+            if (pieces.Length != 2)
+                continue;
+
+            string name = Uri.UnescapeDataString(
+                pieces[0]);
+
+            if (!string.Equals(
+                name,
+                key,
+                StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string value = Uri.UnescapeDataString(
+                pieces[1].Replace("+", " "));
+
+            return value;
+        }
+
+        return "";
+    }
+
+    static void MessageBox(string message)
+    {
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = "msg.exe",
+            Arguments = "\"" + message.Replace("\"", "'") + "\"",
+            UseShellExecute = true,
+            CreateNoWindow = true
+        });
     }
 }
