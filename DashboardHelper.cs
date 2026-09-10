@@ -33,6 +33,18 @@ class DashboardHelper
         string path = GetQueryParam(uri, "path");
         string mode = GetQueryParam(uri, "mode") ?? "select";
 
+        // DEBUG: write exactly what Windows passed to DashboardHelper.exe
+        File.WriteAllText(
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+                "dashboard-helper-debug.txt"
+            ),
+            "args[0] = " + uriText + Environment.NewLine +
+            "path   = " + path + Environment.NewLine +
+            "mode   = " + mode + Environment.NewLine +
+            "exists = " + File.Exists(path)
+        );
+        
         if (string.IsNullOrWhiteSpace(path))
             return 4;
 
