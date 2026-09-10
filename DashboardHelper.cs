@@ -2,6 +2,15 @@ using System;
 using System.Diagnostics;
 using System.IO;
 
+// DashboardHelper.exe
+// Registered handler for: dashboard://open?path=C:/full/path/to/file&mode=open
+//
+//   mode=select  -> File Explorer, file highlighted   (default, old behavior)
+//   mode=open    -> opens in the default app (Word, Excel, Notepad, ...)
+//   mode=word    -> forces Microsoft Word
+//   mode=excel   -> forces Microsoft Excel
+//   mode=powerpoint / mode=ppt -> forces Microsoft PowerPoint
+
 class DashboardHelper
 {
     [STAThread]
@@ -12,115 +21,113 @@ class DashboardHelper
 
         string uriText = args[0];
 
-        if (!uriText.StartsWith(
-            "dashboard://open",
-            StringComparison.OrdinalIgnoreCase))
-        {
+        if (!uriText.StartsWith("dashboard://open", StringComparison.OrdinalIgnoreCase))
             return 2;
-        }
 
-        if (!Uri.TryCreate(
-            uriText,
-            UriKind.Absolute,
-            out Uri? uri))
-        {
+        if (!Uri.TryCreate(uriText, UriKind.Absolute, out Uri uri))
             return 3;
-        }
 
-        string path = GetQueryParameter(uri, "path");
+        // Parse the query string ourselves so we decode exactly once
+        // (HttpUtility.ParseQueryString already unescapes, and calling
+        // Uri.UnescapeDataString on top of it breaks paths with '%').
+        string path = GetQueryParam(uri, "path");
+        string mode = GetQueryParam(uri, "mode") ?? "select";
 
         if (string.IsNullOrWhiteSpace(path))
             return 4;
 
-        // Convert URL-style slashes to Windows slashes.
-        path = path.Replace('/', '\\');
-
-        // Basic safety check.
-        if (path.Contains("\"") ||
-            path.Contains("\r") ||
-            path.Contains("\n"))
-        {
+        // Safety: this helper only opens/selects a file path.
+        // It does not execute arbitrary commands.
+        if (path.IndexOfAny(new[] { '"', '\r', '\n' }) >= 0)
             return 5;
-        }
 
-        // Make sure the target actually exists.
-        if (!File.Exists(path) && !Directory.Exists(path))
+        // The path must actually exist.
+        if (!File.Exists(path))
+            return 7;
+
+        try
         {
-            MessageBox(
-                "Dashboard Helper\n\n" +
-                "The requested file could not be found:\n\n" +
-                path +
-                "\n\n" +
-                "Check the Recent Files Folder path in Dashboard Settings."
-            );
+            switch (mode.ToLowerInvariant())
+            {
+                case "select":
+                    // Old behavior: highlight in File Explorer.
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "explorer.exe",
+                        Arguments = "/select,\"" + path + "\"",
+                        UseShellExecute = true
+                    });
+                    break;
 
+                case "word":
+                    return LaunchOfficeApp("winword.exe", path);
+                case "excel":
+                    return LaunchOfficeApp("excel.exe", path);
+                case "powerpoint":
+                case "ppt":
+                    return LaunchOfficeApp("powerpnt.exe", path);
+
+                case "open":
+                default:
+                    // Open with whatever app Windows associates with this file
+                    // (.docx -> Word, .xlsx -> Excel, .pptx -> PowerPoint, ...).
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = path,
+                        UseShellExecute = true
+                    });
+                    break;
+            }
+
+            return 0;
+        }
+        catch
+        {
             return 6;
         }
+    }
 
+    // Office apps register on PATH when installed, so Process.Start can
+    // find winword.exe / excel.exe / powerpnt.exe directly.
+    static int LaunchOfficeApp(string appExe, string path)
+    {
         try
         {
             Process.Start(new ProcessStartInfo
             {
-                FileName = "explorer.exe",
-                Arguments = "/select,\"" + path + "\"",
+                FileName = appExe,
+                Arguments = "\"" + path + "\"",
                 UseShellExecute = true
             });
-
             return 0;
         }
-        catch (Exception ex)
+        catch
         {
-            MessageBox(
-                "Dashboard Helper\n\n" +
-                "Could not open File Explorer.\n\n" +
-                ex.Message
-            );
-
-            return 7;
+            // Office not found or failed to start — fall back to the
+            // default app so the file still opens.
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = path,
+                UseShellExecute = true
+            });
+            return 0;
         }
     }
 
-    static string GetQueryParameter(Uri uri, string key)
+    static string GetQueryParam(Uri uri, string key)
     {
         string query = uri.Query.TrimStart('?');
+        if (query.Length == 0) return null;
 
-        foreach (string part in query.Split(
-            '&',
-            StringSplitOptions.RemoveEmptyEntries))
+        foreach (string pair in query.Split('&'))
         {
-            string[] pieces = part.Split('=', 2);
+            int idx = pair.IndexOf('=');
+            string k = idx < 0 ? pair : pair.Substring(0, idx);
+            string v = idx < 0 ? "" : pair.Substring(idx + 1);
 
-            if (pieces.Length != 2)
-                continue;
-
-            string name = Uri.UnescapeDataString(
-                pieces[0]);
-
-            if (!string.Equals(
-                name,
-                key,
-                StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            string value = Uri.UnescapeDataString(
-                pieces[1].Replace("+", " "));
-
-            return value;
+            if (string.Equals(Uri.UnescapeDataString(k), key, StringComparison.OrdinalIgnoreCase))
+                return Uri.UnescapeDataString(v.Replace('+', ' '));
         }
-
-        return "";
-    }
-
-    static void MessageBox(string message)
-    {
-        Process.Start(new ProcessStartInfo
-        {
-            FileName = "msg.exe",
-            Arguments = "\"" + message.Replace("\"", "'") + "\"",
-            UseShellExecute = true,
-            CreateNoWindow = true
-        });
+        return null;
     }
 }
